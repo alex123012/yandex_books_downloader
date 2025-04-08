@@ -1,3 +1,0 @@
-crypto==1.4.1
-pycookiecheat==0.4.3
-requests==2.31.0

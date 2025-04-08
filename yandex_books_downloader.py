@@ -13,6 +13,9 @@ import requests
 from Crypto.Cipher import AES
 
 
+BOOKS_DOMAIN = "books.yandex.ru"
+
+
 def bytess(arr):
     assert type(arr) in [list]
     return array.array('B', arr).tobytes()
@@ -56,13 +59,21 @@ class ScriptParser(HTMLParser):
 
     def handle_script_data(self, script_data):
         logging.debug("script_data:%s ...", script_data[:40])
-        S = "window.CLIENT_PARAMS"
+        S = 'userMetadata\\":'
         if S not in script_data:
             return
-        after = script_data[script_data.find(S)+len(S):]
+
+        after = script_data[script_data.find(S) + len(S) :]
         logging.debug("after: %s", after)
-        json_text = after[after.find("=")+1:after.find(";")]
-        self.client_params = json.loads(json_text.strip())
+
+        E = "}"
+        json_text = after[: after.find(E) + len(E)]
+        logging.debug("json_text: %s", json_text)
+
+        json_string = json.loads('"' + json_text.strip() + '"')
+        logging.debug("json_string: %s", json_string)
+
+        self.client_params = json.loads(json_string.strip())
         logging.debug("client_params: %s", self.client_params)
 
 
@@ -119,7 +130,7 @@ class BookDownloader:
         assert self.secret is not None
 
     def download_secret(self):
-        url = "https://reader.bookmate.com/%s" % self.bookid
+        url = f"https://{BOOKS_DOMAIN}/reader/{self.bookid}"
         html = self.downloader.request_url(url).text
         logging.debug("html:%s ...", html[:20])
         parser = ScriptParser()
@@ -135,7 +146,7 @@ class BookDownloader:
 
     def download_metadata(self, bookid):
         logging.debug("download_metadata(%s)", bookid)
-        url = "https://reader.bookmate.com/p/api/v5/books/%s/metadata/v4" % bookid  # noqa: E501
+        url = f"https://{BOOKS_DOMAIN}/p/api/v5/books/{bookid}/metadata/v4"
         metadata_response = self.downloader.request_url(url)
         logging.debug("metadata_response:%s ...", metadata_response.text[:40])
         return metadata_response.json()
@@ -186,7 +197,7 @@ class BookDownloader:
             if fname == "toc.ncx":
                 continue
             logging.debug("fname:%s", fname)
-            url = "https://reader.bookmate.com/p/a/4/d/{uuid}/contents/OEBPS/{fname}".format(uuid=uuid, fname=fname)
+            url = f"https://{BOOKS_DOMAIN}/p/a/4/d/{uuid}/contents/OEBPS/{fname}"
             try:
                 response = self.downloader.request_url(url)
                 self.downloader.save_bytes(response.content, "OEBPS/"+fname)
@@ -203,7 +214,7 @@ class BookDownloader:
         self.downloader.delete_css()
 
 
-class Bookmate:
+class YandexBook:
     def __init__(self, outdir, cookies):
         assert os.path.exists(outdir), "path %s does not exist" % outdir
         self.outdir = outdir
@@ -217,16 +228,20 @@ class Bookmate:
 
 
 def get_cookies():
-    if os.environ.get('BMS') is not None:
-        bms = os.environ.get('BMS')
+    auth_cookie_name = "Session_id"
+    if os.environ.get("SESSION_ID") is not None:
+        session_id = os.environ.get("SESSION_ID")
     else:
         try:
             from pycookiecheat import chrome_cookies
-            cc = chrome_cookies("https://reader.bookmate.com")
-            bms = cc["bms"]
+            cc = chrome_cookies(f"https://{BOOKS_DOMAIN}")
+            session_id = cc[auth_cookie_name]
         except Exception:
-            bms = input("Enter bms cookie\n(your browser -> developer tools -> application -> bookmate.com -> bms -> Value) :")
-    return {"bms": bms}
+            session_id = input(
+                f"Enter {auth_cookie_name} cookie\n(your browser -> developer tools -> application -> Cookies -> https://{BOOKS_DOMAIN} -> {auth_cookie_name} -> Value) :"
+            )
+    return {auth_cookie_name: session_id}
+
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
@@ -243,8 +258,8 @@ if __name__ == "__main__":
     if not os.path.exists(arg.outdir):
         logging.info("Creating folder %s ...", arg.outdir)
         os.makedirs(arg.outdir)
-    bookmate = Bookmate(outdir=arg.outdir, cookies=get_cookies())
-    book = bookmate.get_book(bookid=arg.bookid)
+    yandex_book = YandexBook(outdir=arg.outdir, cookies=get_cookies())
+    book = yandex_book.get_book(bookid=arg.bookid)
     if arg.download:
         book.download()
     if arg.delete_css:
@@ -253,8 +268,3 @@ if __name__ == "__main__":
         book.make_epub()
     if arg.delete_downloaded:
         book.delete_downloaded()
-    # url = bookid if arg.bookid.startswith("http") else "https://reader.bookmate.com/%s" % arg.bookid  # noqa: E501
-    # downloader = BookDownloader(url, "out")
-    # downloader.download_book()
-    # downloader.make_epub()
-    # downloader.delete_downloaded()
