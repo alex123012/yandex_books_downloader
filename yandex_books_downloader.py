@@ -2,13 +2,11 @@
 import os
 import argparse
 import shutil
-import json
 import array
 import base64
 import zipfile
 import logging
 from xml.etree import ElementTree as ET
-from html.parser import HTMLParser
 import requests
 from Crypto.Cipher import AES
 
@@ -38,45 +36,6 @@ def zipdir(path, ziph):
             ziph.write(filename=src, arcname=os.path.relpath(src, top))
 
 
-class ScriptParser(HTMLParser):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.__data = None
-        self.client_params = []
-
-    def handle_starttag(self, tag, attrs):
-        if tag == "script":
-            self.__data = ""
-
-    def handle_endtag(self, tag):
-        if tag == "script":
-            self.handle_script_data(self.__data)
-            self.__data = None
-
-    def handle_data(self, data):
-        if self.__data is not None:
-            self.__data += data
-
-    def handle_script_data(self, script_data):
-        logging.debug("script_data:%s ...", script_data[:40])
-        S = 'userMetadata\\":'
-        if S not in script_data:
-            return
-
-        after = script_data[script_data.find(S) + len(S) :]
-        logging.debug("after: %s", after)
-
-        E = "}"
-        json_text = after[: after.find(E) + len(E)]
-        logging.debug("json_text: %s", json_text)
-
-        json_string = json.loads('"' + json_text.strip() + '"')
-        logging.debug("json_string: %s", json_string)
-
-        self.client_params = json.loads(json_string.strip())
-        logging.debug("client_params: %s", self.client_params)
-
-
 class Downloader:
     def __init__(self, outdir, cookies):
         self.outdir = outdir
@@ -93,7 +52,7 @@ class Downloader:
 
     def request_url(self, url):
         logging.debug("downloading %s ...", url)
-        response = requests.get(url, cookies=self.cookies)
+        response = requests.get(url, cookies=self.cookies, timeout=30)
         logging.debug("response:%s", response)
         assert response.status_code in [200], response.status_code
         return response
@@ -130,12 +89,10 @@ class BookDownloader:
         assert self.secret is not None
 
     def download_secret(self):
-        url = f"https://{BOOKS_DOMAIN}/reader/{self.bookid}"
-        html = self.downloader.request_url(url).text
-        logging.debug("html:%s ...", html[:20])
-        parser = ScriptParser()
-        parser.feed(html)
-        secret = parser.client_params["secret"]
+        url = f"https://{BOOKS_DOMAIN}/reader/p/api/v5/metadata_secret?lang=ru"
+        secret_json = self.downloader.request_url(url).json()
+        logging.debug("secret response: %s", str(secret_json))
+        secret = secret_json["secret"]
         logging.debug("secret: %s", secret)
         return secret
 
